@@ -12,6 +12,8 @@ def run_capm_test():
     print("1. Loading data...")
     try:
         prices = pd.read_csv('german_market_data.csv', index_col=0, parse_dates=True)
+        # Remove duplicate columns
+        prices = prices.loc[:, ~prices.columns.duplicated()]
         betas = pd.read_csv('beta_results.csv', index_col=0)
     except FileNotFoundError:
         print("Error: Could not find 'german_market_data.csv' or 'beta_results.csv'.")

@@ -17,8 +17,10 @@ def estimate_betas():
         print(f"   Error loading data: {e}")
         return
 
-    # 2. Prepare Data
-    print("2. Pre-cleaning data...")
+    # 2. IMMEDIATE DATA CLEANING: Remove duplicate columns
+    print("2. Cleaning data (removing duplicates)...")
+    data = data.loc[:, ~data.columns.duplicated()]
+    print(f"   After removing duplicates: {data.shape[0]} rows, {data.shape[1]} columns")
     
     # Check for Market and RF
     if 'Market' not in data.columns or 'RF' not in data.columns:
@@ -75,6 +77,11 @@ def estimate_betas():
             
             # Run Regression
             model = sm.OLS(Y, X_with_const).fit()
+            
+            # Check R-squared: If > 0.99, it's a data error (perfect fake match - Market Clone)
+            if model.rsquared > 0.99:
+                print(f"   Skipping Market Clone: {stock} (R² = {model.rsquared:.4f})")
+                continue
             
             # Store Results
             results_list.append({

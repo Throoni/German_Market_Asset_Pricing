@@ -20,6 +20,9 @@ def efficient_frontier():
     # Load data
     data = pd.read_csv('german_market_data.csv', index_col=0, parse_dates=True)
     
+    # Remove duplicate columns
+    data = data.loc[:, ~data.columns.duplicated()]
+    
     # Ensure index is Datetime
     if not isinstance(data.index, pd.DatetimeIndex):
         data.index = pd.to_datetime(data.index)
