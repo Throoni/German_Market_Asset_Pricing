@@ -10,7 +10,7 @@ def download_data():
     end_date = '2025-12-31'
     market_ticker = '^GDAXI'
     
-    # DAX (40), MDAX (Selected), SDAX (Selected) - Total 88
+    # 88 Tickers (DAX + MDAX + SDAX)
     tickers = [
         # DAX
         'SAP.DE', 'SIE.DE', 'ALV.DE', 'DTE.DE', 'AIR.DE', 'BMW.DE', 'MBG.DE', 'BAS.DE', 
@@ -28,57 +28,63 @@ def download_data():
         'TLX.DE', 'TTK.DE', 'UTDI.DE', 'VAR1.DE', 'WOS.DE', 'WSU.DE', 'ZO1.DE'
     ]
 
-    # 1. Download Data
-    # combining market ticker with stock tickers for one request
+    # 1. Download Stocks (YFinance)
+    print("1. Fetching Stocks from Yahoo...")
     all_tickers = [market_ticker] + tickers
+    stock_data = yf.download(all_tickers, start=start_date, end=end_date, progress=False)['Adj Close']
     
-    data = yf.download(
-        all_tickers,
-        start=start_date,
-        end=end_date,
-        progress=True,
-        auto_adjust=False  # We want Adj Close usually, but auto_adjust=False gives us 'Adj Close' column explicitly
-    )['Adj Close']
+    if market_ticker in stock_data.columns:
+        stock_data = stock_data.rename(columns={market_ticker: 'Market'})
 
-    # 2. Rename Market Column
-    if market_ticker in data.columns:
-        data = data.rename(columns={market_ticker: 'Market'})
+    # 2. Download Real Risk-Free Rate (Direct from FRED URL)
+    print("2. Fetching German 10Y Bund Yield from FRED...")
+    # URL for Series: IRLTLT01DEM156N (Long-Term Govt Bond Yields: 10-year: Main for Germany)
+    fred_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=IRLTLT01DEM156N"
     
-    # 3. Create Risk-Free Rate (Approximation)
-    # Create empty Series with same index
-    rf_series = pd.Series(index=data.index, dtype=float)
-    
-    # Logic: 0% before July 2022, 2.5% after
-    cutoff_date = pd.Timestamp('2022-07-01').tz_localize(data.index.dtype.tz) if data.index.tz else pd.Timestamp('2022-07-01')
-    
-    mask_zero = data.index < cutoff_date
-    mask_hike = data.index >= cutoff_date
-    
-    rf_annual_zero = 0.0
-    rf_annual_hike = 0.025
-    
-    # Convert to daily: (1+r)^(1/252) - 1
-    rf_daily_zero = (1 + rf_annual_zero)**(1/252) - 1
-    rf_daily_hike = (1 + rf_annual_hike)**(1/252) - 1
-    
-    rf_series[mask_zero] = rf_daily_zero
-    rf_series[mask_hike] = rf_daily_hike
-    
-    data['RF'] = rf_series
+    try:
+        rf_data = pd.read_csv(fred_url, index_col=0, parse_dates=True)
+        # Rename the column to 'RF_Annual'
+        rf_data.columns = ['RF_Annual']
+        
+        # Resample to Daily (Forward Fill) to match stock data
+        rf_daily = rf_data.resample('D').ffill()
+        
+        # Filter to our date range
+        rf_daily = rf_daily[(rf_daily.index >= start_date) & (rf_daily.index <= end_date)]
+        
+        # Convert Annual Percent (e.g., 2.5) to Daily Decimal (e.g., 0.000098)
+        # Formula: (1 + r/100)^(1/252) - 1
+        rf_daily['RF'] = (1 + rf_daily['RF_Annual'] / 100)**(1/252) - 1
+        
+        print("   Success: Downloaded Real Rates.")
+        
+    except Exception as e:
+        print(f"   Error downloading FRED data: {e}")
+        print("   Fallback: Using 2.5% constant approximation.")
+        # Fallback logic just in case
+        rf_daily = pd.DataFrame(index=stock_data.index)
+        rf_daily['RF'] = (1 + 0.025)**(1/252) - 1
 
-    # 4. Clean Data
-    # Drop columns that are almost entirely empty (failed downloads)
-    data = data.dropna(axis=1, thresh=int(len(data)*0.1))
+    # 3. Merge
+    print("3. Merging Data...")
+    # Join stocks with the daily RF column
+    final_data = stock_data.join(rf_daily['RF'], how='left')
     
-    # Fill small gaps (holidays) but keep leading NaNs (pre-IPO)
-    data = data.ffill(limit=5)
+    # Fill any missing RF days (holidays)
+    final_data['RF'] = final_data['RF'].ffill().bfill()
+
+    # 4. Clean
+    # Drop columns that are mostly empty
+    final_data = final_data.dropna(axis=1, thresh=int(len(final_data)*0.1))
+    
+    # Fill small internal gaps
+    final_data = final_data.ffill(limit=5)
 
     print(f"Download complete.")
-    print(f"Shape: {data.shape}")
-    print(f"Date range: {data.index.min().date()} to {data.index.max().date()}")
+    print(f"Shape: {final_data.shape}")
+    print(f"Date range: {final_data.index.min().date()} to {final_data.index.max().date()}")
     
-    # Save
-    data.to_csv('german_market_data.csv')
+    final_data.to_csv('german_market_data.csv')
     print("Saved to 'german_market_data.csv'")
 
 if __name__ == "__main__":
