@@ -11,10 +11,13 @@ def run_capm_test():
     # 1. Load Data
     print("1. Loading data...")
     try:
-        prices = pd.read_csv('german_market_data.csv', index_col='Date', parse_dates=True)
-        betas = pd.read_csv('beta_results.csv', index_col='Stock')
+        prices = pd.read_csv('german_market_data.csv', index_col=0, parse_dates=True)
+        betas = pd.read_csv('beta_results.csv', index_col=0)
     except FileNotFoundError:
         print("Error: Could not find 'german_market_data.csv' or 'beta_results.csv'.")
+        return
+    except Exception as e:
+        print(f"Error loading data: {e}")
         return
 
     # 2. Calculate Average Excess Returns (The 'Y' Variable)

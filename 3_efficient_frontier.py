@@ -18,7 +18,7 @@ def efficient_frontier():
     print("\n1. Loading and preparing data...")
     
     # Load data
-    data = pd.read_csv('german_market_data.csv', index_col='Date', parse_dates=True)
+    data = pd.read_csv('german_market_data.csv', index_col=0, parse_dates=True)
     
     # Ensure index is Datetime
     if not isinstance(data.index, pd.DatetimeIndex):

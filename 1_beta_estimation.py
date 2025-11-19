@@ -1,155 +1,123 @@
-"""
-German Market Asset Pricing - Beta Estimation Script (Robust Version)
-Calculates Market Beta for every stock using OLS regression with error handling
-"""
-
-import numpy as np
 import pandas as pd
+import numpy as np
 import statsmodels.api as sm
 
 def estimate_betas():
-    print("=" * 60)
+    print("============================================================")
     print("BETA ESTIMATION (Robust Version)")
-    print("=" * 60)
+    print("============================================================")
+
+    # 1. Load Data
+    print("1. Loading data...")
+    try:
+        # FIX: Use index_col=0 to automatically use the first column (Dates) as the index
+        data = pd.read_csv('german_market_data.csv', index_col=0, parse_dates=True)
+        print(f"   Data loaded: {data.shape[0]} rows, {data.shape[1]} columns")
+    except Exception as e:
+        print(f"   Error loading data: {e}")
+        return
+
+    # 2. Prepare Data
+    print("2. Pre-cleaning data...")
     
-    # ============================================================================
-    # 1. LOAD DATA
-    # ============================================================================
-    print("\n1. Loading data...")
-    data = pd.read_csv('german_market_data.csv', index_col='Date', parse_dates=True)
-    
-    # Ensure index is Datetime
-    if not isinstance(data.index, pd.DatetimeIndex):
-        data.index = pd.to_datetime(data.index)
-    
-    print(f"   Data loaded: {data.shape[0]} rows, {data.shape[1]} columns")
-    
-    # ============================================================================
-    # 2. PRE-CLEANING
-    # ============================================================================
-    print("\n2. Pre-cleaning data...")
-    
-    # Calculate returns using pct_change()
+    # Check for Market and RF
+    if 'Market' not in data.columns or 'RF' not in data.columns:
+        print("   CRITICAL ERROR: 'Market' or 'RF' column missing.")
+        print(f"   Available columns: {data.columns.tolist()}")
+        return
+
+    # Calculate Returns
     returns = data.pct_change()
     
-    # Replace all infinite values with np.nan
+    # Handle infinite values
     returns = returns.replace([np.inf, -np.inf], np.nan)
-    
-    # Drop the 'RF' column from the stock list (but keep it for calculation)
-    rf_series = returns['RF'].copy()
-    stock_columns = [col for col in returns.columns if col not in ['RF', 'Market']]
+
+    # Separate Market and RF
     market_returns = returns['Market'].copy()
+    rf_returns = returns['RF'].copy()
     
-    print(f"   Processing {len(stock_columns)} stocks")
+    # Drop Market and RF from the stock list to get just the assets
+    stock_returns = returns.drop(columns=['Market', 'RF'])
     
-    # ============================================================================
-    # 3. THE ROBUST LOOP
-    # ============================================================================
-    print("\n3. Running OLS regressions...")
+    print(f"   Calculating Excess Returns for {len(stock_returns.columns)} assets...")
+
+    # 3. Run Regressions
+    print("3. Running OLS regressions...")
     
-    results = []
-    skipped_count = 0
-    
-    # Loop through each stock
-    for stock in stock_columns:
-        # Construct temporary dataframe with columns: ['Y', 'X', 'RF']
-        df_temp = pd.DataFrame({
-            'Y': returns[stock],
-            'X': market_returns,
-            'RF': rf_series
-        })
-        
-        # Calculate Excess Returns inside this loop
-        Y_excess = df_temp['Y'] - df_temp['RF']
-        X_excess = df_temp['X'] - df_temp['RF']
-        
-        # Update df_temp with excess returns
-        df_temp['Y_excess'] = Y_excess
-        df_temp['X_excess'] = X_excess
-        
-        # CRITICAL STEP: Apply dropna() to remove any row where any of these values are missing
-        df_temp = df_temp[['Y_excess', 'X_excess']].dropna()
-        
-        # Check length: If less than 60 observations, skip the stock
-        if len(df_temp) < 60:
-            skipped_count += 1
-            continue
-        
-        # ============================================================================
-        # 4. REGRESSION WITH ERROR HANDLING
-        # ============================================================================
+    results_list = []
+
+    for stock in stock_returns.columns:
         try:
-            # Define Y and X for regression
-            Y = df_temp['Y_excess']
-            X = df_temp['X_excess']
+            # Create a mini dataframe for this specific stock
+            # We need to align the Stock, Market, and RF for this specific asset
+            df_temp = pd.DataFrame({
+                'Stock': stock_returns[stock],
+                'Market': market_returns,
+                'RF': rf_returns
+            })
             
-            # Add constant to X (for Alpha)
+            # Drop rows where THIS stock (or market/RF) has missing data
+            # This handles the "Unbalanced Panel" (IPOs/Delistings)
+            df_temp = df_temp.dropna()
+            
+            # Skip if too little data (less than 6 months approx)
+            if len(df_temp) < 120:
+                continue
+
+            # Calculate Excess Returns
+            # Y = Stock - RF
+            # X = Market - RF
+            Y = (df_temp['Stock'] - df_temp['RF']).rename('Stock_Excess')
+            X = (df_temp['Market'] - df_temp['RF']).rename('Market_Excess')
+            
+            # Add constant (Alpha)
             X_with_const = sm.add_constant(X)
             
-            # Run OLS Regression
+            # Run Regression
             model = sm.OLS(Y, X_with_const).fit()
             
-            # Extract results
-            alpha = model.params['const']
-            beta = model.params['X_excess']
-            beta_tstat = model.tvalues['X_excess']
-            beta_pvalue = model.pvalues['X_excess']
-            r_squared = model.rsquared
-            
-            # Append to results
-            results.append({
+            # Store Results
+            results_list.append({
                 'Stock': stock,
-                'Beta': beta,
-                'Alpha': alpha,
-                'Beta_tstat': beta_tstat,
-                'Beta_pvalue': beta_pvalue,
-                'R_squared': r_squared,
+                'Beta': model.params['Market_Excess'],
+                'Alpha': model.params['const'],
+                'Beta_tstat': model.tvalues['Market_Excess'],
+                'Beta_pvalue': model.pvalues['Market_Excess'],
+                'R_squared': model.rsquared,
                 'N_observations': len(df_temp)
             })
             
         except Exception as e:
-            # If regression fails (SVD error or other math error), skip
-            print(f"   Skipping {stock} due to math error: {type(e).__name__}")
-            skipped_count += 1
+            # Skip stocks with errors (SVD, insufficient data, etc.)
+            print(f"   Skipping {stock}: {type(e).__name__}")
             continue
+
+    print(f"   Completed regressions for {len(results_list)} stocks")
+
+    # 4. Output
+    print("4. Preparing output...")
     
-    print(f"   Completed regressions for {len(results)} stocks")
-    if skipped_count > 0:
-        print(f"   Skipped {skipped_count} stocks (insufficient data or errors)")
+    if len(results_list) == 0:
+        print("   ERROR: No successful regressions!")
+        return
     
-    # ============================================================================
-    # 5. OUTPUT
-    # ============================================================================
-    print("\n4. Preparing output...")
-    
-    # Convert results list to DataFrame
-    results_df = pd.DataFrame(results)
+    # Convert to DataFrame
+    results_df = pd.DataFrame(results_list)
     
     # Sort by Beta (descending)
     results_df = results_df.sort_values('Beta', ascending=False)
     
-    # Save successful results to CSV
+    # Save
     results_df.to_csv('beta_results.csv', index=False)
     print(f"   Results saved to 'beta_results.csv'")
     
-    # Print summary
+    # Print Summary
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
-    
-    if len(results_df) > 0:
-        print(f"\nAverage Beta: {results_df['Beta'].mean():.2f}")
-        
-        print("\nTop 5 Highest Betas:")
-        for idx, row in results_df.head(5).iterrows():
-            print(f"  {row['Stock']}: {row['Beta']:.2f}")
-        
-        print("\nTop 5 Lowest Betas:")
-        for idx, row in results_df.tail(5).iterrows():
-            print(f"  {row['Stock']}: {row['Beta']:.2f}")
-    else:
-        print("No successful regressions completed.")
-    
+    print(f"Average Beta: {results_df['Beta'].mean():.2f}")
+    print(f"Highest Beta: {results_df.iloc[0]['Stock']} ({results_df.iloc[0]['Beta']:.2f})")
+    print(f"Lowest Beta: {results_df.iloc[-1]['Stock']} ({results_df.iloc[-1]['Beta']:.2f})")
     print("=" * 60)
     
     return results_df
