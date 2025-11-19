@@ -1,0 +1,141 @@
+import pandas as pd
+import numpy as np
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def run_final_analysis():
+    print("============================================================")
+    print("FINAL ANALYSIS: CORRECTED METHODOLOGY")
+    print("============================================================")
+
+    # 1. Load Data (Using index_col=0 to fix the Date error)
+    try:
+        data = pd.read_csv('german_market_data.csv', index_col=0, parse_dates=True)
+        print(f"1. Data Loaded. Shape: {data.shape}")
+    except Exception as e:
+        print(f"CRITICAL ERROR: Could not read file. {e}")
+        return
+
+    # 2. Calculate Returns CORRECTLY
+    # Stocks & Market: We need % Return (pct_change)
+    # Risk-Free Rate: It IS a return already. Do NOT use pct_change.
+    
+    prices = data.drop(columns=['RF'])
+    rf_rates = data['RF'] # Raw daily rates (e.g. 0.0001)
+    
+    returns = prices.pct_change().replace([np.inf, -np.inf], np.nan)
+    
+    # 3. Estimate Betas (The Loop)
+    print("2. Estimating Betas (Method: Excess Returns = Return - RF_Rate)...")
+    
+    betas = []
+    market_col = 'Market'
+    
+    for stock in returns.columns:
+        if stock == market_col: continue
+        
+        try:
+            # Align Data
+            df = pd.DataFrame({
+                'R_Stock': returns[stock],
+                'R_Market': returns[market_col],
+                'RF': rf_rates
+            }).dropna()
+            
+            if len(df) < 100: continue
+            
+            # PROPER CAPM EQUATION:
+            # Y = Stock_Return - Risk_Free_Rate
+            # X = Market_Return - Risk_Free_Rate
+            Y = df['R_Stock'] - df['RF']
+            X = df['R_Market'] - df['RF']
+            
+            # Run Regression
+            model = sm.OLS(Y, sm.add_constant(X)).fit()
+            
+            betas.append({
+                'Stock': stock,
+                'Beta': model.params.iloc[1],
+                'Alpha': model.params.iloc[0],
+                'R_squared': model.rsquared
+            })
+        except:
+            continue
+
+    beta_df = pd.DataFrame(betas)
+    beta_df.to_csv('beta_results.csv', index=False)
+    
+    print(f"   Calculated {len(beta_df)} valid betas.")
+    print(f"   Average Beta: {beta_df['Beta'].mean():.2f}")
+    print(f"   Max Beta: {beta_df['Beta'].max():.2f} ({beta_df.sort_values('Beta').iloc[-1]['Stock']})")
+    print(f"   Min Beta: {beta_df['Beta'].min():.2f} ({beta_df.sort_values('Beta').iloc[0]['Stock']})")
+
+    # 4. CAPM Test (Security Market Line)
+    print("3. Generating Security Market Line...")
+    
+    # Avg Daily Excess Return * 252 (Annualized)
+    avg_excess = (returns.sub(rf_rates, axis=0).mean() * 252).to_frame('Avg_Return')
+    capm_df = avg_excess.join(beta_df.set_index('Stock'), how='inner')
+    
+    plt.figure(figsize=(10, 6))
+    sns.regplot(data=capm_df, x='Beta', y='Avg_Return', ci=None, line_kws={'color':'red'})
+    
+    # Label Top 3 Winners (Highest Alpha/Residuals)
+    model_sml = sm.OLS(capm_df['Avg_Return'], sm.add_constant(capm_df['Beta'])).fit()
+    capm_df['Resid'] = model_sml.resid
+    for stock in capm_df.nlargest(3, 'Resid').index:
+        plt.text(capm_df.loc[stock, 'Beta'], capm_df.loc[stock, 'Avg_Return'], stock, fontweight='bold')
+        
+    plt.title(f"Security Market Line (Slope: {model_sml.params.iloc[1]:.4f})")
+    plt.xlabel("Beta")
+    plt.ylabel("Annualized Excess Return")
+    plt.grid(True, alpha=0.3)
+    plt.savefig('sml_plot.png')
+    print("   Saved 'sml_plot.png'")
+
+    # 5. Portfolio Optimization
+    print("4. Optimizing Portfolio...")
+    
+    valid_stocks = beta_df['Stock'].tolist()
+    subset = returns[valid_stocks].fillna(0)
+    
+    mean_daily = subset.mean()
+    cov_matrix = subset.cov()
+    
+    # Monte Carlo Simulation
+    num_ports = 5000
+    results = np.zeros((3, num_ports))
+    weights_record = []
+    
+    for i in range(num_ports):
+        w = np.random.random(len(valid_stocks))
+        w /= np.sum(w)
+        weights_record.append(w)
+        
+        p_ret = np.sum(mean_daily * w) * 252
+        p_vol = np.sqrt(np.dot(w.T, np.dot(cov_matrix, w))) * np.sqrt(252)
+        
+        results[0,i] = p_ret
+        results[1,i] = p_vol
+        results[2,i] = (p_ret - 0.025) / p_vol # Sharpe
+        
+    max_idx = np.argmax(results[2])
+    opt_weights = pd.Series(weights_record[max_idx], index=valid_stocks).sort_values(ascending=False)
+    
+    plt.figure(figsize=(10, 6))
+    plt.scatter(results[1,:], results[0,:], c=results[2,:], cmap='viridis', alpha=0.5)
+    plt.colorbar(label='Sharpe Ratio')
+    plt.scatter(results[1,max_idx], results[0,max_idx], c='red', s=100, marker='*', label='Max Sharpe')
+    plt.title("Efficient Frontier")
+    plt.xlabel("Volatility")
+    plt.ylabel("Return")
+    plt.legend()
+    plt.savefig('efficient_frontier.png')
+    print("   Saved 'efficient_frontier.png'")
+    
+    print("\n--- FINAL PORTFOLIO RECOMMENDATION ---")
+    print(opt_weights.head(5))
+
+if __name__ == "__main__":
+    run_final_analysis()
