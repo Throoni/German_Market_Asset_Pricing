@@ -22,4 +22,4 @@ The analysis is conducted using Python.
 * `3_efficient_frontier.py`: Portfolio optimization.
 
 ## Authors
-* [Your Name]
+* Messiah Gord
