@@ -1,0 +1,44 @@
+================================================================================
+STATISTICAL SUMMARY: GERMAN MARKET ASSET PRICING ANALYSIS
+================================================================================
+
+1. ALPHA SIGNIFICANCE
+--------------------------------------------------------------------------------
+Daily   :   8 /  74 stocks with significant Alpha (p < 0.05) = 10.81%
+Monthly :  11 /  74 stocks with significant Alpha (p < 0.05) = 14.86%
+
+2. CROSS-SECTIONAL REGRESSION (SECURITY MARKET LINE)
+--------------------------------------------------------------------------------
+
+Daily Frequency:
+  Slope (gamma_1): -0.008116
+  t-statistic: -0.924
+  p-value: 0.358764
+  Realized Market Risk Premium: -0.000518
+  Test (Slope = MRP) p-value: 0.390070
+  ✗ Beta factor is NOT statistically significant (p >= 0.05)
+
+Monthly Frequency:
+  Slope (gamma_1): 1.883731
+  t-statistic: 2.563
+  p-value: 0.012463
+  Realized Market Risk Premium: -0.094286
+  Test (Slope = MRP) p-value: 0.008841
+  ✓ Beta factor is statistically significant (p < 0.05)
+
+3. PORTFOLIO OPTIMIZATION RESULTS
+--------------------------------------------------------------------------------
+
+Tangency Portfolio (Max Sharpe Ratio):
+  Annualized Return: 0.028891 (2.89%)
+  Annualized Volatility: 0.474705 (47.47%)
+  Sharpe Ratio: -18.141873
+
+Global Minimum Variance Portfolio:
+  Annualized Return: 0.096431 (9.64%)
+  Annualized Volatility: 0.071900 (7.19%)
+  Sharpe Ratio: -118.839171
+
+================================================================================
+End of Statistical Summary
+================================================================================
